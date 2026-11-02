@@ -1,0 +1,64 @@
+name: pages-build-deployment
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build static site
+        run: |
+          test -s index.html
+          grep -qi '<!DOCTYPE html>' index.html
+          mkdir -p dist
+          cp index.html dist/index.html
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  report-build-status:
+    name: report-build-status
+    if: always()
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add build result to workflow summary
+        env:
+          BUILD_RESULT: ${{ needs.build.result }}
+        run: |
+          echo '## Build status' >> "$GITHUB_STEP_SUMMARY"
+          echo "Build job: **${BUILD_RESULT}**" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    name: deploy
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && needs.build.result == 'success'
+    needs: [build, report-build-status]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy site
+        id: deployment
+        uses: actions/deploy-pages@v4
